@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { DuplicateGroup } from '@/types/domain'
 import { useDuplicateTabs } from '../hooks'
-import { TabList, ConfirmDialog } from '../components'
+import { ConfirmDialog } from '../components'
 
 interface DuplicateFinderProps {
   onBack: () => void

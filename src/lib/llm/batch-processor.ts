@@ -1,4 +1,4 @@
-import type { LLMProviderInterface, CategoryResult, TopicResult, FolderNameResult } from './types'
+import type { LLMProviderInterface, TopicResult, FolderNameResult } from './types'
 import type { TabInfo, BookmarkNode, OperationProgress } from '@/types/domain'
 import { buildCategorizePrompt, buildTopicPrompt, buildFolderNamePrompt, type TabItem } from './prompt-builder'
 import { parseCategoryResults, parseTopicResult, parseFolderNameResult } from './response-parser'

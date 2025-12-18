@@ -15,8 +15,8 @@ export interface WindowInfo {
   id: number
   tabs: TabInfo[]
   focused: boolean
-  type: chrome.windows.WindowType
-  state: chrome.windows.WindowState
+  type: string
+  state: string
   topic?: string
 }
 

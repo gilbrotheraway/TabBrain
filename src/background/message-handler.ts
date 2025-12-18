@@ -1,10 +1,10 @@
-import type { TabInfo, WindowInfo, DuplicateGroup, OperationProgress, LLMConfig } from '@/types/domain'
+import type { TabInfo, OperationProgress } from '@/types/domain'
 import { getAllTabs, getTabsInWindow, closeTabs, groupTabs, sortTabsByDomain } from '@/lib/chrome/tabs'
 import { getAllWindows, mergeWindows } from '@/lib/chrome/windows'
 import { getBookmarkTree, getAllBookmarkUrls, renameBookmark } from '@/lib/chrome/bookmarks'
 import { getCategoryColor } from '@/lib/chrome/tab-groups'
 import { getLLMConfig } from '@/lib/chrome/storage'
-import { findDuplicateTabs, findDuplicateBookmarks, getDuplicateTabsToRemove } from '@/lib/algorithms/clustering'
+import { findDuplicateTabs, findDuplicateBookmarks } from '@/lib/algorithms/clustering'
 import { domainOverlap } from '@/lib/algorithms/similarity'
 import { OpenAICompatibleProvider } from '@/lib/llm/openai-compatible'
 import { categorizeTabs, detectWindowTopic } from '@/lib/llm/batch-processor'
@@ -38,7 +38,8 @@ export interface MessageResponse<T = unknown> {
   error?: string
 }
 
-type MessageHandler<T = unknown, R = unknown> = (payload: T) => Promise<R>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type MessageHandler = (payload: any) => Promise<unknown>
 
 const handlers: Partial<Record<MessageType, MessageHandler>> = {
   GET_ALL_TABS: async () => {

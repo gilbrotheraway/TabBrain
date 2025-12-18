@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import type { WindowInfo } from '@/types/domain'
 import { useWindows, useWindowTopic, useCategorizeTabs, useTabGroups, useLLMConfig } from '../hooks'
 import { TabList, ProgressOverlay } from '../components'
