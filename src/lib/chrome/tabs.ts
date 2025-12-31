@@ -121,11 +121,20 @@ export async function sortTabsByDomain(windowId: number): Promise<void> {
   await sortTabs(windowId, { sortBy: 'domain', sortDirection: 'asc' })
 }
 
+// Check if tab groups are supported (Chrome only, not Firefox)
+const supportsTabGroups = typeof chrome !== 'undefined' && 'tabGroups' in chrome
+
 export async function groupTabs(
   tabIds: number[],
   options: { title?: string; color?: chrome.tabGroups.ColorEnum; windowId?: number }
 ): Promise<number> {
   if (tabIds.length === 0) return -1
+
+  // Firefox doesn't support tab groups
+  if (!supportsTabGroups) {
+    console.warn('Tab groups not supported in this browser')
+    return -1
+  }
 
   const groupId = await chrome.tabs.group({
     tabIds,
@@ -144,6 +153,8 @@ export async function groupTabs(
 
 export async function ungroupTabs(tabIds: number[]): Promise<void> {
   if (tabIds.length === 0) return
+  // Firefox doesn't support tab groups
+  if (!supportsTabGroups) return
   await chrome.tabs.ungroup(tabIds)
 }
 

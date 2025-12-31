@@ -2,38 +2,63 @@
 
 # TabBrain
 
-AI-powered Chrome extension for organizing browser tabs and bookmarks. Uses local or cloud LLMs to intelligently categorize, group, and clean up your browser chaos.
+AI-powered browser extension for organizing tabs and bookmarks. Uses local or cloud LLMs to intelligently categorize, group, and clean up your browser chaos.
+
+![Chrome](https://img.shields.io/badge/Chrome-Supported-green)
+![Firefox](https://img.shields.io/badge/Firefox-Supported-orange)
+![Safari](https://img.shields.io/badge/Safari-Supported-blue)
+![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)
+![React](https://img.shields.io/badge/React-18-61dafb)
 
 ## Quick Start
 
 ```bash
 npm install
-npm run build
+npm run build        # Chrome
+npm run build:firefox  # Firefox
+npm run build:all    # All browsers
 ```
 
-1. Open `chrome://extensions` in Chrome
-2. Enable **Developer mode** (top right toggle)
-3. Click **Load unpacked** → select the `dist` folder
-4. Click the TabBrain icon to open the side panel
-5. Go to **Settings** to configure your LLM provider (Ollama, OpenAI, etc.)
+### Chrome / Edge / Brave
+1. Open `chrome://extensions`
+2. Enable **Developer mode**
+3. Click **Load unpacked** → select `dist` folder
+4. Click TabBrain icon to open side panel
 
-![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-green)
-![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)
-![React](https://img.shields.io/badge/React-18-61dafb)
+### Firefox
+1. Open `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on**
+3. Select `dist-firefox/manifest.json`
+4. Click TabBrain icon in sidebar
 
-## Cross-Platform Support
+### Safari (macOS)
+1. Build the extension: `npm run build`
+2. Convert using Xcode:
+   ```bash
+   xcrun safari-web-extension-converter dist --project-location ./safari
+   ```
+3. Open the generated Xcode project
+4. Build and run to install in Safari
 
-TabBrain works on **Windows**, **macOS**, and **Linux** - anywhere Chrome runs.
+## Browser Support
 
-| Platform | Status | Notes |
-|----------|--------|-------|
-| Windows | Fully Supported | |
-| macOS | Fully Supported | |
-| Linux | Fully Supported | |
-| ChromeOS | Fully Supported | |
+| Browser | Status | Notes |
+|---------|--------|-------|
+| Chrome | Full Support | Side panel + tab groups |
+| Edge | Full Support | Same as Chrome |
+| Brave | Full Support | Same as Chrome |
+| Firefox | Full Support | Uses sidebar (no tab groups) |
+| Safari | Full Support | Requires Xcode conversion |
 
-The extension uses standard Chrome Extension APIs that work identically across all platforms. No platform-specific configuration required.
+## Platform Support
+
+| Platform | Status |
+|----------|--------|
+| Windows | Fully Supported |
+| macOS | Fully Supported |
+| Linux | Fully Supported |
+| ChromeOS | Fully Supported |
 
 ## Features
 
