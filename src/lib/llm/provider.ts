@@ -52,6 +52,10 @@ export abstract class BaseLLMProvider implements LLMProviderInterface {
         throw new LLMError('Context too long', 'CONTEXT_TOO_LONG', error)
       }
 
+      if (message.includes('tool') && message.includes('unique')) {
+        throw new LLMError('Duplicate tool names detected - check API provider configuration', 'INVALID_CONFIG', error)
+      }
+
       if (message.includes('network') || message.includes('fetch')) {
         throw new LLMError('Network error', 'NETWORK_ERROR', error)
       }

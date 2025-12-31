@@ -14,6 +14,8 @@ interface OpenAIRequest {
   temperature?: number
   max_tokens?: number
   stream?: boolean
+  // Note: tools field is intentionally excluded to prevent duplicate tool name errors
+  // Some API providers (like Open WebUI) may add tools automatically
 }
 
 interface OpenAIResponse {
@@ -52,6 +54,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
       temperature: options.temperature ?? this.config.temperature,
       max_tokens: options.maxTokens ?? 1000,
       stream: false,
+      // Explicitly exclude tools to prevent API errors from duplicate tool names
     }
 
     logger.debug('OpenAI request', { url, model: body.model, messageCount: body.messages.length })
@@ -66,6 +69,15 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
       if (!response.ok) {
         const errorText = await response.text()
         logger.error('OpenAI error response', { status: response.status, body: errorText })
+        
+        // Check for duplicate tool names error
+        if (errorText.includes('tools') && errorText.includes('unique')) {
+          throw new LLMError(
+            'Duplicate tool names detected. This may be caused by the API provider automatically adding tools. Check your API provider configuration.',
+            'INVALID_CONFIG'
+          )
+        }
+        
         throw new Error(`API error: ${response.status} ${errorText}`)
       }
 
@@ -106,8 +118,19 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
         return []
       }
 
-      const data = await response.json() as { data: Array<{ id: string }> }
-      return data.data.map((m) => m.id)
+      const data = await response.json()
+
+      // Handle Ollama's response format (uses 'models' array with 'name' field)
+      if (data.models && Array.isArray(data.models)) {
+        return data.models.map((m: { name: string }) => m.name)
+      }
+
+      // Handle OpenAI-compatible format (uses 'data' array with 'id' field)
+      if (data.data && Array.isArray(data.data)) {
+        return data.data.map((m: { id: string }) => m.id)
+      }
+
+      return []
     } catch {
       return []
     }
@@ -127,6 +150,15 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
 
   private getModelsUrl(): string {
     const base = this.config.baseUrl.replace(/\/$/, '')
+
+    // Ollama uses /api/tags endpoint instead of /models
+    if (base.includes('11434') || base.includes('ollama')) {
+      if (base.endsWith('/api')) {
+        return `${base}/tags`
+      }
+      return `${base}/api/tags`
+    }
+
     if (base.endsWith('/v1')) {
       return `${base}/models`
     }

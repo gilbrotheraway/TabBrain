@@ -79,14 +79,19 @@ export default function App() {
     setTestResult(null)
 
     try {
-      const response = await fetch(`${config.baseUrl}/models`, {
-        headers: config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {},
-      })
+      // Save config first so background script can use it
+      await chrome.storage.local.set({ llmConfig: config })
 
-      if (response.ok) {
+      // Route through background script to avoid CORS issues
+      const response = await chrome.runtime.sendMessage({ type: 'TEST_LLM_CONNECTION' })
+
+      if (response?.success) {
         setTestResult({ success: true, message: 'Connection successful!' })
       } else {
-        setTestResult({ success: false, message: `Error: ${response.status} ${response.statusText}` })
+        setTestResult({
+          success: false,
+          message: response?.error || 'Connection failed',
+        })
       }
     } catch (error) {
       setTestResult({

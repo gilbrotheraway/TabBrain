@@ -1,13 +1,13 @@
 import { useState } from 'react'
-import type { BookmarkDuplicateGroup, FolderSuggestion } from '@/types/domain'
-import { useDuplicateBookmarks, useFolderSuggestions, useDeadLinkChecker, useLLMConfig } from '../hooks'
-import { ConfirmDialog } from '../components'
+import type { BookmarkDuplicateGroup, FolderSuggestion, BookmarkNode } from '@/types/domain'
+import { useDuplicateBookmarks, useFolderSuggestions, useDeadLinkChecker, useOrphanBookmarks, useLargeFolders, useLLMConfig } from '../hooks'
+import { ConfirmDialog, SliderInput } from '../components'
 
 interface BookmarkCleanerProps {
   onBack: () => void
 }
 
-type Tab = 'duplicates' | 'folders' | 'deadlinks'
+type Tab = 'duplicates' | 'folders' | 'deadlinks' | 'orphans' | 'large'
 
 export function BookmarkCleaner({ onBack }: BookmarkCleanerProps) {
   const [activeTab, setActiveTab] = useState<Tab>('duplicates')
@@ -25,7 +25,7 @@ export function BookmarkCleaner({ onBack }: BookmarkCleanerProps) {
         <h2 className="text-lg font-medium">Clean Bookmarks</h2>
       </div>
 
-      <div className="flex border-b border-gray-200 dark:border-gray-700">
+      <div className="flex border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
         <TabButton
           active={activeTab === 'duplicates'}
           onClick={() => setActiveTab('duplicates')}
@@ -45,11 +45,25 @@ export function BookmarkCleaner({ onBack }: BookmarkCleanerProps) {
         >
           Dead Links
         </TabButton>
+        <TabButton
+          active={activeTab === 'orphans'}
+          onClick={() => setActiveTab('orphans')}
+        >
+          Orphans
+        </TabButton>
+        <TabButton
+          active={activeTab === 'large'}
+          onClick={() => setActiveTab('large')}
+        >
+          Large Folders
+        </TabButton>
       </div>
 
       {activeTab === 'duplicates' && <DuplicateBookmarks />}
       {activeTab === 'folders' && <FolderRename />}
       {activeTab === 'deadlinks' && <DeadLinks />}
+      {activeTab === 'orphans' && <OrphanBookmarks />}
+      {activeTab === 'large' && <LargeFolders />}
     </div>
   )
 }
@@ -437,6 +451,294 @@ function DeadLinks() {
         onConfirm={handleRemove}
         onCancel={() => setShowConfirm(false)}
       />
+    </div>
+  )
+}
+
+function OrphanBookmarks() {
+  const { orphans, loading, error, scan } = useOrphanBookmarks()
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const { removeBookmarks } = useDuplicateBookmarks()
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [removing, setRemoving] = useState(false)
+
+  const handleRemove = async () => {
+    setRemoving(true)
+    await removeBookmarks(Array.from(selectedIds))
+    setSelectedIds(new Set())
+    setRemoving(false)
+    setShowConfirm(false)
+    scan()
+  }
+
+  const groupedByDomain = orphans.reduce((acc, bookmark) => {
+    if (!bookmark.url) return acc
+    try {
+      const domain = new URL(bookmark.url).hostname
+      if (!acc[domain]) acc[domain] = []
+      acc[domain].push(bookmark)
+    } catch {
+      if (!acc['other']) acc['other'] = []
+      acc['other'].push(bookmark)
+    }
+    return acc
+  }, {} as Record<string, BookmarkNode[]>)
+
+  if (!orphans.length && !loading) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-gray-500 mb-4">Find bookmarks in root folders that need organizing</p>
+        <button
+          onClick={scan}
+          disabled={loading}
+          className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+        >
+          {loading ? 'Scanning...' : 'Find Orphan Bookmarks'}
+        </button>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="text-center py-8">
+        <div className="animate-spin w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full mx-auto mb-4" />
+        <p className="text-gray-500">Scanning bookmarks...</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {error && (
+        <div className="p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-sm">
+          {error}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">
+          Found {orphans.length} orphan bookmark{orphans.length !== 1 ? 's' : ''}
+        </p>
+        <button onClick={scan} className="text-sm text-primary-600 hover:text-primary-700">
+          Rescan
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {Object.entries(groupedByDomain).map(([domain, bookmarks]) => (
+          <div key={domain} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <div className="bg-gray-50 dark:bg-gray-800 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">{domain}</p>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {bookmarks.length} bookmark{bookmarks.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+            </div>
+            <div className="divide-y divide-gray-100 dark:divide-gray-800">
+              {bookmarks.map((bookmark) => (
+                <label
+                  key={bookmark.id}
+                  className="flex items-center gap-2 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(bookmark.id)}
+                    onChange={() => {
+                      const newSelection = new Set(selectedIds)
+                      if (newSelection.has(bookmark.id)) {
+                        newSelection.delete(bookmark.id)
+                      } else {
+                        newSelection.add(bookmark.id)
+                      }
+                      setSelectedIds(newSelection)
+                    }}
+                    className="rounded"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{bookmark.title}</p>
+                    <p className="text-xs text-gray-500 truncate">{bookmark.url}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {selectedIds.size > 0 && (
+        <div className="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-4 -mx-4">
+          <button
+            onClick={() => setShowConfirm(true)}
+            disabled={removing}
+            className="w-full py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+          >
+            Remove {selectedIds.size} Bookmark{selectedIds.size !== 1 ? 's' : ''}
+          </button>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={showConfirm}
+        title="Remove Orphan Bookmarks"
+        message={`Remove ${selectedIds.size} orphan bookmark${selectedIds.size !== 1 ? 's' : ''}? This cannot be undone.`}
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={handleRemove}
+        onCancel={() => setShowConfirm(false)}
+      />
+    </div>
+  )
+}
+
+function LargeFolders() {
+  const { largeFolders, loading, error, scan } = useLargeFolders()
+  const [threshold, setThreshold] = useState(100)
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
+
+  const toggleFolder = (id: string) => {
+    const newExpanded = new Set(expandedFolders)
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id)
+    } else {
+      newExpanded.add(id)
+    }
+    setExpandedFolders(newExpanded)
+  }
+
+  if (!largeFolders.length && !loading) {
+    return (
+      <div className="text-center py-8 space-y-4">
+        <p className="text-gray-500 mb-4">Find folders with many items that should be split</p>
+
+        <div className="max-w-md mx-auto px-4">
+          <SliderInput
+            value={threshold}
+            min={50}
+            max={200}
+            step={10}
+            label="Folder size threshold"
+            minLabel="50 items"
+            maxLabel="200 items"
+            valueFormatter={(v) => `${v} items`}
+            onChange={setThreshold}
+          />
+        </div>
+
+        <button
+          onClick={() => scan(threshold)}
+          disabled={loading}
+          className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+        >
+          {loading ? 'Scanning...' : 'Find Large Folders'}
+        </button>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="text-center py-8">
+        <div className="animate-spin w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full mx-auto mb-4" />
+        <p className="text-gray-500">Scanning folders...</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {error && (
+        <div className="p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-sm">
+          {error}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">
+          Found {largeFolders.length} large folder{largeFolders.length !== 1 ? 's' : ''}
+        </p>
+        <button onClick={() => scan(threshold)} className="text-sm text-primary-600 hover:text-primary-700">
+          Rescan
+        </button>
+      </div>
+
+      <div className="max-w-md px-4">
+        <SliderInput
+          value={threshold}
+          min={50}
+          max={200}
+          step={10}
+          label="Folder size threshold"
+          minLabel="50 items"
+          maxLabel="200 items"
+          valueFormatter={(v) => `${v} items`}
+          onChange={setThreshold}
+        />
+      </div>
+
+      <div className="space-y-3">
+        {largeFolders.map(({ folder, itemCount }) => (
+          <div key={folder.id} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <button
+              onClick={() => toggleFolder(folder.id)}
+              className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FolderIcon />
+                  <span className="font-medium">{folder.title}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                    {itemCount} items
+                  </span>
+                  <svg
+                    className={`w-5 h-5 text-gray-500 transition-transform ${expandedFolders.has(folder.id) ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </div>
+            </button>
+
+            {expandedFolders.has(folder.id) && folder.children && (
+              <div className="divide-y divide-gray-100 dark:divide-gray-800 max-h-64 overflow-y-auto">
+                {folder.children.slice(0, 50).map((child) => (
+                  <div key={child.id} className="px-4 py-2">
+                    <div className="flex items-start gap-2">
+                      {child.url ? (
+                        <>
+                          <svg className="w-4 h-4 mt-0.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                          </svg>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm truncate">{child.title}</p>
+                            <p className="text-xs text-gray-500 truncate">{child.url}</p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <FolderIcon />
+                          <p className="text-sm">{child.title}</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {folder.children.length > 50 && (
+                  <div className="px-4 py-2 text-sm text-gray-500 text-center">
+                    and {folder.children.length - 50} more items...
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

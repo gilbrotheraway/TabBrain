@@ -103,3 +103,75 @@ export interface TopicResult {
 export interface FolderNameResult {
   name: string
 }
+
+// ===== Sorting Options =====
+
+export type SortBy = 'domain' | 'title' | 'dateOpened'
+export type SortDirection = 'asc' | 'desc'
+export type SortScope = 'current' | 'all'
+
+export interface SortOptions {
+  scope: SortScope
+  sortBy: SortBy
+  sortDirection: SortDirection
+  groupSubdomains: boolean
+}
+
+export const DEFAULT_SORT_OPTIONS: SortOptions = {
+  scope: 'current',
+  sortBy: 'domain',
+  sortDirection: 'asc',
+  groupSubdomains: false,
+}
+
+// ===== Tab Group Options =====
+
+export interface TabGroupOptions {
+  minTabsForGroup: number
+  useAISubtopics: boolean
+  collapseGroupsOnCreate: boolean
+}
+
+export const DEFAULT_TAB_GROUP_OPTIONS: TabGroupOptions = {
+  minTabsForGroup: 2,
+  useAISubtopics: false,
+  collapseGroupsOnCreate: false,
+}
+
+// ===== Window Merge Options =====
+
+export interface MergeOptions {
+  overlapThreshold: number
+}
+
+export const DEFAULT_MERGE_OPTIONS: MergeOptions = {
+  overlapThreshold: 0.5,
+}
+
+// ===== Bookmark Options =====
+
+export interface BookmarkOptions {
+  largeFolderThreshold: number
+  genericFolderPatterns: string[]
+}
+
+export const DEFAULT_BOOKMARK_OPTIONS: BookmarkOptions = {
+  largeFolderThreshold: 100,
+  genericFolderPatterns: ['New Folder', 'Untitled', 'New folder', 'Folder'],
+}
+
+// ===== User Preferences =====
+
+export interface UserPreferences {
+  sorting: SortOptions
+  tabGroups: TabGroupOptions
+  merge: MergeOptions
+  bookmarks: BookmarkOptions
+}
+
+export const DEFAULT_USER_PREFERENCES: UserPreferences = {
+  sorting: DEFAULT_SORT_OPTIONS,
+  tabGroups: DEFAULT_TAB_GROUP_OPTIONS,
+  merge: DEFAULT_MERGE_OPTIONS,
+  bookmarks: DEFAULT_BOOKMARK_OPTIONS,
+}

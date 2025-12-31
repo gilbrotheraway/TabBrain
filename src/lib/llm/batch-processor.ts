@@ -1,7 +1,30 @@
 import type { LLMProviderInterface, TopicResult, FolderNameResult } from './types'
 import type { TabInfo, BookmarkNode, OperationProgress } from '@/types/domain'
-import { buildCategorizePrompt, buildTopicPrompt, buildFolderNamePrompt, type TabItem } from './prompt-builder'
-import { parseCategoryResults, parseTopicResult, parseFolderNameResult } from './response-parser'
+import {
+  buildCategorizePrompt,
+  buildTopicPrompt,
+  buildFolderNamePrompt,
+  buildSmartAssignPrompt,
+  buildSmartCategorizePrompt,
+  buildAnalyzeFoldersPrompt,
+  buildReorganizeFolderPrompt,
+  buildSmartGroupNamePrompt,
+  type TabItem,
+  type BookmarkItem,
+  type ExistingFolder,
+} from './prompt-builder'
+import {
+  parseCategoryResults,
+  parseTopicResult,
+  parseFolderNameResult,
+  parseSmartCategoryResults,
+  parseSmartAssignResults,
+  parseFolderAnalysisResult,
+  parseReorganizeFolderResult,
+  parseSmartGroupNameResult,
+  type FolderAnalysisResult,
+  type ReorganizeFolderResult,
+} from './response-parser'
 import { splitIntoBatches } from '@/lib/utils/token-estimator'
 import { retry, shouldRetryLLMRequest, sleep } from '@/lib/utils/retry'
 import { logger } from '@/lib/utils/logger'
@@ -190,4 +213,319 @@ export async function suggestFolderNames(
   }
 
   return results
+}
+
+// ============================================
+// SMART AI CATEGORIZATION FUNCTIONS
+// ============================================
+
+export interface SmartCategorizedTab {
+  tab: TabInfo
+  topic: string
+  subtopic: string
+}
+
+export interface SmartAssignedBookmark {
+  bookmark: BookmarkNode
+  targetFolder: string
+  isNewFolder: boolean
+  suggestedNewFolderName?: string
+}
+
+/**
+ * Smart categorize tabs by topic and subtopic (not just domain)
+ * Uses content analysis to group by meaning
+ */
+export async function smartCategorizeTabs(
+  provider: LLMProviderInterface,
+  tabs: TabInfo[],
+  windowTopic?: string,
+  options: BatchOptions = {}
+): Promise<SmartCategorizedTab[]> {
+  const { onProgress, concurrency = 2, delayBetweenBatches = 500 } = options
+  const maxTokens = provider.config.maxContextTokens
+
+  // Prepare items with indices
+  const items: TabItem[] = tabs.map((tab, index) => ({
+    index: index + 1,
+    title: tab.title,
+    url: tab.url,
+  }))
+
+  // Split into batches (smaller for smart categorization due to more complex output)
+  const batches = splitIntoBatches(items, Math.floor(maxTokens * 0.7))
+  const results: SmartCategorizedTab[] = []
+  let processedBatches = 0
+
+  logger.info(`Smart categorizing ${tabs.length} tabs in ${batches.length} batches`)
+
+  for (let i = 0; i < batches.length; i += concurrency) {
+    const batchGroup = batches.slice(i, i + concurrency)
+
+    const batchResults = await Promise.all(
+      batchGroup.map(async (batch) => {
+        return retry(
+          async () => {
+            const messages = buildSmartCategorizePrompt(batch, windowTopic)
+            const response = await provider.complete({ messages, maxTokens: 800 })
+            return parseSmartCategoryResults(response.content)
+          },
+          {
+            maxRetries: 2,
+            shouldRetry: shouldRetryLLMRequest,
+            onRetry: (error, attempt) => {
+              logger.warn(`Retry ${attempt} for smart categorize batch`, { error })
+            },
+          }
+        )
+      })
+    )
+
+    // Map results back to tabs
+    for (let j = 0; j < batchGroup.length; j++) {
+      const batch = batchGroup[j]
+      const categoryResults = batchResults[j] ?? []
+
+      for (const item of batch ?? []) {
+        const tab = tabs[item.index - 1]
+        const result = categoryResults.find((r) => r.i === item.index)
+        if (tab) {
+          results.push({
+            tab,
+            topic: result?.topic ?? 'Uncategorized',
+            subtopic: result?.subtopic ?? 'General',
+          })
+        }
+      }
+    }
+
+    processedBatches += batchGroup.length
+    onProgress?.({
+      current: processedBatches,
+      total: batches.length,
+      status: `Smart categorizing batch ${processedBatches}/${batches.length}`,
+    })
+
+    if (i + concurrency < batches.length) {
+      await sleep(delayBetweenBatches)
+    }
+  }
+
+  return results
+}
+
+/**
+ * Smart assign orphan bookmarks to existing folders based on content/topic
+ * Returns folder assignments with flags for new folder suggestions
+ */
+export async function smartAssignBookmarks(
+  provider: LLMProviderInterface,
+  bookmarks: BookmarkNode[],
+  existingFolders: ExistingFolder[],
+  options: BatchOptions = {}
+): Promise<SmartAssignedBookmark[]> {
+  const { onProgress, concurrency = 2, delayBetweenBatches = 500 } = options
+  const maxTokens = provider.config.maxContextTokens
+
+  // Prepare items with indices
+  const items: BookmarkItem[] = bookmarks
+    .filter((b) => b.url)
+    .map((b, index) => ({
+      id: b.id,
+      index: index + 1,
+      title: b.title,
+      url: b.url!,
+    }))
+
+  // Split into batches
+  const batches = splitIntoBatches(items, Math.floor(maxTokens * 0.6))
+  const results: SmartAssignedBookmark[] = []
+  let processedBatches = 0
+
+  logger.info(`Smart assigning ${items.length} bookmarks in ${batches.length} batches`)
+
+  for (let i = 0; i < batches.length; i += concurrency) {
+    const batchGroup = batches.slice(i, i + concurrency)
+
+    const batchResults = await Promise.all(
+      batchGroup.map(async (batch) => {
+        return retry(
+          async () => {
+            const messages = buildSmartAssignPrompt(batch, existingFolders)
+            const response = await provider.complete({ messages, maxTokens: 600 })
+            return parseSmartAssignResults(response.content)
+          },
+          {
+            maxRetries: 2,
+            shouldRetry: shouldRetryLLMRequest,
+            onRetry: (error, attempt) => {
+              logger.warn(`Retry ${attempt} for smart assign batch`, { error })
+            },
+          }
+        )
+      })
+    )
+
+    // Map results back to bookmarks
+    for (let j = 0; j < batchGroup.length; j++) {
+      const batch = batchGroup[j]
+      const assignResults = batchResults[j] ?? []
+
+      for (const item of batch ?? []) {
+        const bookmark = bookmarks.find((b) => b.id === item.id)
+        const result = assignResults.find((r) => r.i === item.index)
+
+        if (bookmark) {
+          const folderValue = result?.folder ?? 'Uncategorized'
+          const isNewFolder = folderValue.startsWith('new:')
+
+          results.push({
+            bookmark,
+            targetFolder: isNewFolder ? folderValue.slice(4) : folderValue,
+            isNewFolder,
+            suggestedNewFolderName: isNewFolder ? folderValue.slice(4) : undefined,
+          })
+        }
+      }
+    }
+
+    processedBatches += batchGroup.length
+    onProgress?.({
+      current: processedBatches,
+      total: batches.length,
+      status: `Smart assigning batch ${processedBatches}/${batches.length}`,
+    })
+
+    if (i + concurrency < batches.length) {
+      await sleep(delayBetweenBatches)
+    }
+  }
+
+  return results
+}
+
+/**
+ * Analyze user's existing folder organization pattern
+ * Helps understand their naming conventions and categories
+ */
+export async function analyzeUserFolders(
+  provider: LLMProviderInterface,
+  folders: Array<{ name: string; itemCount: number; sampleTitles: string[] }>
+): Promise<FolderAnalysisResult | null> {
+  if (folders.length === 0) return null
+
+  const messages = buildAnalyzeFoldersPrompt(folders)
+
+  try {
+    const response = await retry(
+      async () => provider.complete({ messages, maxTokens: 300 }),
+      { maxRetries: 2, shouldRetry: shouldRetryLLMRequest }
+    )
+    return parseFolderAnalysisResult(response.content)
+  } catch (error) {
+    logger.error('Failed to analyze user folders', error)
+    return null
+  }
+}
+
+/**
+ * Suggest how to reorganize a messy folder
+ */
+export async function suggestFolderReorganization(
+  provider: LLMProviderInterface,
+  folderName: string,
+  bookmarks: BookmarkNode[],
+  existingFolders: string[]
+): Promise<ReorganizeFolderResult | null> {
+  if (bookmarks.length === 0) return null
+
+  const bookmarkData = bookmarks
+    .filter((b) => b.url)
+    .map((b) => ({ title: b.title, url: b.url! }))
+
+  if (bookmarkData.length === 0) return null
+
+  const messages = buildReorganizeFolderPrompt(folderName, bookmarkData, existingFolders)
+
+  try {
+    const response = await retry(
+      async () => provider.complete({ messages, maxTokens: 800 }),
+      { maxRetries: 2, shouldRetry: shouldRetryLLMRequest }
+    )
+    return parseReorganizeFolderResult(response.content)
+  } catch (error) {
+    logger.error('Failed to suggest folder reorganization', error)
+    return null
+  }
+}
+
+/**
+ * Generate a smart, specific group name based on tab content
+ */
+export async function suggestSmartGroupName(
+  provider: LLMProviderInterface,
+  tabs: TabInfo[],
+  category: string
+): Promise<string | null> {
+  if (tabs.length === 0) return null
+
+  const tabData = tabs.map((t) => ({ title: t.title, url: t.url }))
+  const messages = buildSmartGroupNamePrompt(tabData, category)
+
+  try {
+    const response = await retry(
+      async () => provider.complete({ messages, maxTokens: 50 }),
+      { maxRetries: 2, shouldRetry: shouldRetryLLMRequest }
+    )
+    const result = parseSmartGroupNameResult(response.content)
+    return result?.name ?? null
+  } catch (error) {
+    logger.error('Failed to suggest smart group name', error)
+    return null
+  }
+}
+
+/**
+ * Group tabs by topic/subtopic and return organized structure
+ */
+export function groupTabsByTopic(
+  categorizedTabs: SmartCategorizedTab[]
+): Map<string, Map<string, SmartCategorizedTab[]>> {
+  const topicGroups = new Map<string, Map<string, SmartCategorizedTab[]>>()
+
+  for (const item of categorizedTabs) {
+    if (!topicGroups.has(item.topic)) {
+      topicGroups.set(item.topic, new Map())
+    }
+
+    const subtopicMap = topicGroups.get(item.topic)!
+    if (!subtopicMap.has(item.subtopic)) {
+      subtopicMap.set(item.subtopic, [])
+    }
+
+    subtopicMap.get(item.subtopic)!.push(item)
+  }
+
+  return topicGroups
+}
+
+/**
+ * Group bookmark assignments by target folder
+ */
+export function groupBookmarksByFolder(
+  assignments: SmartAssignedBookmark[]
+): Map<string, { bookmarks: SmartAssignedBookmark[]; isNew: boolean }> {
+  const folderGroups = new Map<string, { bookmarks: SmartAssignedBookmark[]; isNew: boolean }>()
+
+  for (const item of assignments) {
+    const key = item.targetFolder
+
+    if (!folderGroups.has(key)) {
+      folderGroups.set(key, { bookmarks: [], isNew: item.isNewFolder })
+    }
+
+    folderGroups.get(key)!.bookmarks.push(item)
+  }
+
+  return folderGroups
 }

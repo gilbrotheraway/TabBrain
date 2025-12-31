@@ -148,6 +148,155 @@ export function parseSimpleCategory(response: string): Category | null {
   return partial ?? null
 }
 
+// ============================================
+// SMART AI CATEGORIZATION PARSERS
+// ============================================
+
+export interface SmartCategoryResult {
+  i: number
+  topic: string
+  subtopic: string
+}
+
+export interface SmartAssignResult {
+  i: number
+  folder: string // Either existing folder name or "new:Suggested Name"
+}
+
+export interface FolderAnalysisResult {
+  categories: string[]
+  namingStyle: 'short' | 'descriptive' | 'emoji'
+  topInterests: string[]
+}
+
+export interface ReorganizeFolderResult {
+  moveToExisting: Array<{ item: number; targetFolder: string }>
+  newSubfolders: Array<{ name: string; items: number[] }>
+  keepInPlace: number[]
+}
+
+export interface SmartGroupNameResult {
+  name: string
+}
+
+/**
+ * Parse smart categorization results (topic + subtopic)
+ */
+export function parseSmartCategoryResults(response: string): SmartCategoryResult[] {
+  const parsed = safeParseJSON<Array<{ i: number; topic: string; subtopic: string }>>(response)
+
+  if (!parsed || !Array.isArray(parsed)) {
+    logger.warn('Invalid smart category response format', { response })
+    return []
+  }
+
+  return parsed
+    .filter(
+      (item) =>
+        typeof item.i === 'number' &&
+        typeof item.topic === 'string' &&
+        typeof item.subtopic === 'string'
+    )
+    .map((item) => ({
+      i: item.i,
+      topic: item.topic.slice(0, 50),
+      subtopic: item.subtopic.slice(0, 50),
+    }))
+}
+
+/**
+ * Parse smart folder assignment results
+ */
+export function parseSmartAssignResults(response: string): SmartAssignResult[] {
+  const parsed = safeParseJSON<Array<{ i: number; folder: string }>>(response)
+
+  if (!parsed || !Array.isArray(parsed)) {
+    logger.warn('Invalid smart assign response format', { response })
+    return []
+  }
+
+  return parsed
+    .filter(
+      (item) => typeof item.i === 'number' && typeof item.folder === 'string'
+    )
+    .map((item) => ({
+      i: item.i,
+      folder: item.folder.slice(0, 100),
+    }))
+}
+
+/**
+ * Parse folder analysis results (user's organization pattern)
+ */
+export function parseFolderAnalysisResult(response: string): FolderAnalysisResult | null {
+  const parsed = safeParseJSON<{
+    categories: string[]
+    namingStyle: string
+    topInterests: string[]
+  }>(response)
+
+  if (!parsed || !Array.isArray(parsed.categories)) {
+    logger.warn('Invalid folder analysis response format', { response })
+    return null
+  }
+
+  const validStyles = ['short', 'descriptive', 'emoji'] as const
+  const namingStyle = validStyles.includes(parsed.namingStyle as typeof validStyles[number])
+    ? (parsed.namingStyle as 'short' | 'descriptive' | 'emoji')
+    : 'descriptive'
+
+  return {
+    categories: parsed.categories.slice(0, 20).map((c) => String(c).slice(0, 50)),
+    namingStyle,
+    topInterests: (parsed.topInterests || []).slice(0, 10).map((i) => String(i).slice(0, 50)),
+  }
+}
+
+/**
+ * Parse folder reorganization suggestions
+ */
+export function parseReorganizeFolderResult(response: string): ReorganizeFolderResult | null {
+  const parsed = safeParseJSON<{
+    moveToExisting: Array<{ item: number; targetFolder: string }>
+    newSubfolders: Array<{ name: string; items: number[] }>
+    keepInPlace: number[]
+  }>(response)
+
+  if (!parsed) {
+    logger.warn('Invalid reorganize folder response format', { response })
+    return null
+  }
+
+  return {
+    moveToExisting: (parsed.moveToExisting || [])
+      .filter((m) => typeof m.item === 'number' && typeof m.targetFolder === 'string')
+      .map((m) => ({ item: m.item, targetFolder: m.targetFolder.slice(0, 100) })),
+    newSubfolders: (parsed.newSubfolders || [])
+      .filter((s) => typeof s.name === 'string' && Array.isArray(s.items))
+      .map((s) => ({ name: s.name.slice(0, 100), items: s.items.filter((i) => typeof i === 'number') })),
+    keepInPlace: (parsed.keepInPlace || []).filter((i) => typeof i === 'number'),
+  }
+}
+
+/**
+ * Parse smart group name result
+ */
+export function parseSmartGroupNameResult(response: string): SmartGroupNameResult | null {
+  const parsed = safeParseJSON<{ name: string }>(response)
+
+  if (!parsed || typeof parsed.name !== 'string') {
+    // Try to extract name
+    const nameMatch = response.match(/"name"\s*:\s*"([^"]+)"/)
+    if (nameMatch?.[1]) {
+      return { name: nameMatch[1].slice(0, 50) }
+    }
+    logger.warn('Invalid smart group name response format', { response })
+    return null
+  }
+
+  return { name: parsed.name.slice(0, 50) }
+}
+
 /**
  * Normalize a category string to a valid category
  */

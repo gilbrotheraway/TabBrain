@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { motion, AnimatePresence } from 'motion/react'
 import type { TabInfo } from '@/types/domain'
 
 interface TabListProps {
@@ -9,6 +10,19 @@ interface TabListProps {
   showWindow?: boolean
   showCategory?: boolean
   categories?: Map<number, string>
+  subtopics?: Map<number, string | undefined>
+}
+
+const categoryColors: Record<string, string> = {
+  Technology: 'bg-blue-500/20 text-blue-400 ring-blue-500/30',
+  Shopping: 'bg-emerald-500/20 text-emerald-400 ring-emerald-500/30',
+  News: 'bg-red-500/20 text-red-400 ring-red-500/30',
+  Entertainment: 'bg-purple-500/20 text-purple-400 ring-purple-500/30',
+  Social: 'bg-pink-500/20 text-pink-400 ring-pink-500/30',
+  Finance: 'bg-green-500/20 text-green-400 ring-green-500/30',
+  Reference: 'bg-yellow-500/20 text-yellow-400 ring-yellow-500/30',
+  Productivity: 'bg-indigo-500/20 text-indigo-400 ring-indigo-500/30',
+  Other: 'bg-surface-700 text-surface-400 ring-surface-600',
 }
 
 export function TabList({
@@ -19,6 +33,7 @@ export function TabList({
   showWindow = false,
   showCategory = false,
   categories,
+  subtopics,
 }: TabListProps) {
   const toggleSelection = (id: number) => {
     if (!onSelectionChange) return
@@ -44,41 +59,73 @@ export function TabList({
 
   if (tabs.length === 0) {
     return (
-      <div className="text-center py-8 text-gray-500">
-        No tabs found
-      </div>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="empty-state py-8"
+      >
+        <TabsIcon className="empty-state-icon" />
+        <p className="empty-state-title">No tabs found</p>
+      </motion.div>
     )
   }
 
   return (
     <div className="space-y-1">
       {selectable && tabs.length > 1 && (
-        <div className="flex items-center gap-2 pb-2 mb-2 border-b border-gray-200 dark:border-gray-700">
-          <input
-            type="checkbox"
-            checked={selectedIds.size === tabs.length}
-            onChange={toggleAll}
-            className="rounded"
-          />
-          <span className="text-sm text-gray-500">
+        <motion.div
+          initial={{ opacity: 0, y: -5 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center gap-3 p-3 glass-card mb-2"
+        >
+          <button
+            onClick={toggleAll}
+            className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
+              selectedIds.size === tabs.length
+                ? 'bg-brand-500 border-brand-500'
+                : selectedIds.size > 0
+                ? 'border-brand-500/50 bg-brand-500/20'
+                : 'border-surface-600 bg-transparent'
+            }`}
+          >
+            {selectedIds.size === tabs.length && (
+              <CheckIcon className="w-3 h-3 text-white" />
+            )}
+            {selectedIds.size > 0 && selectedIds.size < tabs.length && (
+              <MinusIcon className="w-3 h-3 text-brand-400" />
+            )}
+          </button>
+          <span className="text-sm text-surface-400">
             {selectedIds.size === 0
-              ? 'Select all'
-              : `${selectedIds.size} selected`}
+              ? `Select all (${tabs.length})`
+              : `${selectedIds.size} of ${tabs.length} selected`}
           </span>
-        </div>
+        </motion.div>
       )}
 
-      {tabs.map((tab) => (
-        <TabItem
-          key={tab.id}
-          tab={tab}
-          selectable={selectable}
-          selected={selectedIds.has(tab.id)}
-          onToggle={() => toggleSelection(tab.id)}
-          showWindow={showWindow}
-          category={showCategory ? categories?.get(tab.id) : undefined}
-        />
-      ))}
+      <div className="space-y-1">
+        <AnimatePresence mode="popLayout">
+          {tabs.map((tab, index) => (
+            <motion.div
+              key={tab.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, x: -10, height: 0 }}
+              transition={{ delay: index * 0.02 }}
+            >
+              <TabItem
+                tab={tab}
+                selectable={selectable}
+                selected={selectedIds.has(tab.id)}
+                onToggle={() => toggleSelection(tab.id)}
+                showWindow={showWindow}
+                category={showCategory ? categories?.get(tab.id) : undefined}
+                subtopic={subtopics?.get(tab.id)}
+              />
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
     </div>
   )
 }
@@ -90,6 +137,7 @@ interface TabItemProps {
   onToggle: () => void
   showWindow: boolean
   category?: string
+  subtopic?: string
 }
 
 function TabItem({
@@ -99,61 +147,96 @@ function TabItem({
   onToggle,
   showWindow,
   category,
+  subtopic,
 }: TabItemProps) {
   const [imgError, setImgError] = useState(false)
-
   const domain = getDomain(tab.url)
 
   return (
-    <div
+    <motion.div
+      whileHover={{ scale: 1.01, x: 2 }}
+      whileTap={{ scale: 0.99 }}
+      onClick={selectable ? onToggle : undefined}
       className={`
-        flex items-center gap-2 p-2 rounded-lg transition-colors
-        ${selected ? 'bg-primary-50 dark:bg-primary-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800'}
+        flex items-center gap-3 p-3 rounded-xl transition-all cursor-pointer
+        ${selected
+          ? 'bg-brand-500/10 ring-1 ring-brand-500/30'
+          : 'bg-surface-900/50 hover:bg-surface-800/70'
+        }
       `}
     >
       {selectable && (
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={onToggle}
-          className="rounded flex-shrink-0"
-        />
+        <div
+          className={`w-5 h-5 rounded-md border-2 flex-shrink-0 flex items-center justify-center transition-all ${
+            selected
+              ? 'bg-brand-500 border-brand-500'
+              : 'border-surface-600 bg-transparent'
+          }`}
+        >
+          {selected && (
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+            >
+              <CheckIcon className="w-3 h-3 text-white" />
+            </motion.div>
+          )}
+        </div>
       )}
 
-      <div className="w-4 h-4 flex-shrink-0">
+      {/* Favicon */}
+      <div className="w-5 h-5 flex-shrink-0 rounded overflow-hidden bg-surface-800">
         {tab.favIconUrl && !imgError ? (
           <img
             src={tab.favIconUrl}
             alt=""
-            className="w-4 h-4"
+            className="w-5 h-5 object-cover"
             onError={() => setImgError(true)}
           />
         ) : (
-          <div className="w-4 h-4 bg-gray-200 dark:bg-gray-700 rounded" />
+          <div className="w-5 h-5 flex items-center justify-center">
+            <GlobeIcon className="w-3 h-3 text-surface-500" />
+          </div>
         )}
       </div>
 
+      {/* Content */}
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium truncate">{tab.title}</div>
-        <div className="text-xs text-gray-500 truncate">{domain}</div>
+        <p className="text-sm font-medium text-white truncate">
+          {tab.title}
+        </p>
+        <p className="text-xs text-surface-500 truncate">
+          {domain}
+        </p>
       </div>
 
-      {showWindow && (
-        <span className="text-xs text-gray-400 flex-shrink-0">
-          W{tab.windowId}
-        </span>
-      )}
+      {/* Badges */}
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        {tab.pinned && (
+          <div className="p-1 rounded bg-surface-800" title="Pinned">
+            <PinIcon className="w-3 h-3 text-surface-400" />
+          </div>
+        )}
 
-      {category && (
-        <span className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded-full flex-shrink-0">
-          {category}
-        </span>
-      )}
+        {showWindow && (
+          <span className="badge-neutral text-[10px]">
+            W{tab.windowId}
+          </span>
+        )}
 
-      {tab.pinned && (
-        <PinIcon className="w-3 h-3 text-gray-400 flex-shrink-0" />
-      )}
-    </div>
+        {category && (
+          <span
+            className={`px-2 py-0.5 text-[10px] font-medium rounded-full ring-1 ${
+              categoryColors[category] || categoryColors.Other
+            }`}
+            title={subtopic || category}
+          >
+            {subtopic || category}
+          </span>
+        )}
+      </div>
+    </motion.div>
   )
 }
 
@@ -163,6 +246,39 @@ function getDomain(url: string): string {
   } catch {
     return url
   }
+}
+
+// Icons
+function TabsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+    </svg>
+  )
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+    </svg>
+  )
+}
+
+function MinusIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+    </svg>
+  )
+}
+
+function GlobeIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+    </svg>
+  )
 }
 
 function PinIcon({ className }: { className?: string }) {

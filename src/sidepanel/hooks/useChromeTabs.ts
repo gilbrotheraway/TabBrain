@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { TabInfo, WindowInfo, DuplicateGroup } from '@/types/domain'
+import type { TabInfo, WindowInfo, DuplicateGroup, TabGroupOptions } from '@/types/domain'
 import { sendMessage } from '@/background/message-handler'
 
 export function useTabs() {
@@ -96,8 +96,9 @@ export function useTabGroups() {
   const [error, setError] = useState<string | null>(null)
 
   const createGroups = useCallback(async (
-    categorizedTabs: Array<{ tab: TabInfo; category: string }>,
-    windowId: number
+    categorizedTabs: Array<{ tab: TabInfo; category: string; subtopic?: string }>,
+    windowId: number,
+    options?: Partial<TabGroupOptions>
   ) => {
     setLoading(true)
     setError(null)
@@ -105,6 +106,7 @@ export function useTabGroups() {
       const response = await sendMessage('CREATE_TAB_GROUPS', {
         categorizedTabs,
         windowId,
+        options,
       })
       if (!response.success) {
         setError(response.error ?? 'Failed to create groups')
@@ -149,11 +151,11 @@ export function useWindowMerge() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const findSuggestions = useCallback(async () => {
+  const findSuggestions = useCallback(async (options?: { overlapThreshold?: number }) => {
     setLoading(true)
     setError(null)
     try {
-      const response = await sendMessage<MergeSuggestion[]>('FIND_MERGE_SUGGESTIONS')
+      const response = await sendMessage<MergeSuggestion[]>('FIND_MERGE_SUGGESTIONS', options)
       if (response.success && response.data) {
         setSuggestions(response.data)
       } else {

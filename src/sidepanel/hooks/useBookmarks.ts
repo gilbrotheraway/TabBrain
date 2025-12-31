@@ -115,3 +115,54 @@ export function useDeadLinkChecker() {
 
   return { deadLinks, loading, progress, error, scan }
 }
+
+export function useOrphanBookmarks() {
+  const [orphans, setOrphans] = useState<BookmarkNode[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const scan = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await sendMessage<BookmarkNode[]>('FIND_ORPHAN_BOOKMARKS')
+      if (response.success && response.data) {
+        setOrphans(response.data)
+      } else {
+        setError(response.error ?? 'Failed to find orphan bookmarks')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error')
+    }
+    setLoading(false)
+  }, [])
+
+  return { orphans, loading, error, scan }
+}
+
+export function useLargeFolders() {
+  const [largeFolders, setLargeFolders] = useState<Array<{ folder: BookmarkNode; itemCount: number }>>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const scan = useCallback(async (threshold?: number) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await sendMessage<Array<{ folder: BookmarkNode; itemCount: number }>>(
+        'FIND_LARGE_FOLDERS',
+        { threshold }
+      )
+      if (response.success && response.data) {
+        setLargeFolders(response.data)
+      } else {
+        setError(response.error ?? 'Failed to find large folders')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error')
+    }
+    setLoading(false)
+  }, [])
+
+  return { largeFolders, loading, error, scan }
+}

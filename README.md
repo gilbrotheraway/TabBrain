@@ -7,6 +7,19 @@ AI-powered Chrome extension for organizing browser tabs and bookmarks. Uses loca
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)
 ![React](https://img.shields.io/badge/React-18-61dafb)
 
+## Cross-Platform Support
+
+TabBrain works on **Windows**, **macOS**, and **Linux** - anywhere Chrome runs.
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| Windows | Fully Supported | |
+| macOS | Fully Supported | |
+| Linux | Fully Supported | |
+| ChromeOS | Fully Supported | |
+
+The extension uses standard Chrome Extension APIs that work identically across all platforms. No platform-specific configuration required.
+
 ## Features
 
 - **Duplicate Detection** - Find and remove duplicate tabs and bookmarks

@@ -1,4 +1,5 @@
-import type { TabInfo } from '@/types/domain'
+import type { TabInfo, SortOptions } from '@/types/domain'
+import { DEFAULT_SORT_OPTIONS } from '@/types/domain'
 
 export async function getAllTabs(): Promise<TabInfo[]> {
   const tabs = await chrome.tabs.query({})
@@ -51,15 +52,44 @@ export async function moveTabsToIndex(
   }
 }
 
-export async function sortTabsByDomain(windowId: number): Promise<void> {
+/**
+ * Sort tabs in a single window with configurable options
+ */
+export async function sortTabs(
+  windowId: number,
+  options: Partial<SortOptions> = {}
+): Promise<void> {
+  const opts = { ...DEFAULT_SORT_OPTIONS, ...options }
   const tabs = await getTabsInWindow(windowId)
   const pinnedTabs = tabs.filter((t) => t.pinned)
   const unpinnedTabs = tabs.filter((t) => !t.pinned)
 
   unpinnedTabs.sort((a, b) => {
-    const domainA = getDomain(a.url)
-    const domainB = getDomain(b.url)
-    return domainA.localeCompare(domainB)
+    let comparison = 0
+
+    switch (opts.sortBy) {
+      case 'domain':
+        const domainA = opts.groupSubdomains ? getBaseDomain(a.url) : getDomain(a.url)
+        const domainB = opts.groupSubdomains ? getBaseDomain(b.url) : getDomain(b.url)
+        comparison = domainA.localeCompare(domainB)
+        // Secondary sort by full domain when grouping subdomains
+        if (comparison === 0 && opts.groupSubdomains) {
+          comparison = getDomain(a.url).localeCompare(getDomain(b.url))
+        }
+        break
+
+      case 'title':
+        comparison = (a.title || '').localeCompare(b.title || '')
+        break
+
+      case 'dateOpened':
+        // Note: Chrome doesn't expose tab creation time directly
+        // We use index as a proxy (lower index = opened earlier)
+        comparison = a.index - b.index
+        break
+    }
+
+    return opts.sortDirection === 'desc' ? -comparison : comparison
   })
 
   const startIndex = pinnedTabs.length
@@ -69,6 +99,26 @@ export async function sortTabsByDomain(windowId: number): Promise<void> {
       await chrome.tabs.move(tab.id, { index: startIndex + i })
     }
   }
+}
+
+/**
+ * Sort tabs in all windows
+ */
+export async function sortAllTabs(options: Partial<SortOptions> = {}): Promise<void> {
+  const windows = await chrome.windows.getAll({ windowTypes: ['normal'] })
+  for (const window of windows) {
+    if (window.id !== undefined) {
+      await sortTabs(window.id, options)
+    }
+  }
+}
+
+/**
+ * Legacy function for backwards compatibility
+ * @deprecated Use sortTabs() instead
+ */
+export async function sortTabsByDomain(windowId: number): Promise<void> {
+  await sortTabs(windowId, { sortBy: 'domain', sortDirection: 'asc' })
 }
 
 export async function groupTabs(
@@ -118,4 +168,28 @@ function getDomain(url: string): string {
   } catch {
     return url
   }
+}
+
+/**
+ * Get the base domain (parent domain) for subdomain grouping
+ * e.g., docs.github.com -> github.com
+ */
+function getBaseDomain(url: string): string {
+  const domain = getDomain(url)
+  const parts = domain.split('.')
+
+  // Handle common TLDs (co.uk, com.au, etc.)
+  const commonMultiPartTLDs = ['co.uk', 'com.au', 'co.nz', 'co.jp', 'com.br', 'co.in']
+  const lastTwo = parts.slice(-2).join('.')
+
+  if (commonMultiPartTLDs.includes(lastTwo) && parts.length > 2) {
+    return parts.slice(-3).join('.')
+  }
+
+  // Standard domain: take last 2 parts
+  if (parts.length > 2) {
+    return parts.slice(-2).join('.')
+  }
+
+  return domain
 }

@@ -1,7 +1,9 @@
-import type { LLMConfig } from '@/types/domain'
+import type { LLMConfig, UserPreferences } from '@/types/domain'
+import { DEFAULT_USER_PREFERENCES } from '@/types/domain'
 
 export interface StorageSchema {
   llmConfig?: LLMConfig
+  userPreferences?: UserPreferences
   windowTopics?: Record<number, string>
   lastScanResults?: {
     duplicates?: number
@@ -106,4 +108,50 @@ export async function removeWindowTopic(windowId: number): Promise<void> {
   const topics = (await getStorage('windowTopics')) ?? {}
   delete topics[windowId]
   await setStorage('windowTopics', topics)
+}
+
+// User preferences helpers
+export async function getUserPreferences(): Promise<UserPreferences> {
+  try {
+    const prefs = await getStorage('userPreferences')
+    if (!prefs) {
+      return DEFAULT_USER_PREFERENCES
+    }
+
+    // Merge with defaults to ensure all fields are present
+    return {
+      sorting: { ...DEFAULT_USER_PREFERENCES.sorting, ...prefs.sorting },
+      tabGroups: { ...DEFAULT_USER_PREFERENCES.tabGroups, ...prefs.tabGroups },
+      merge: { ...DEFAULT_USER_PREFERENCES.merge, ...prefs.merge },
+      bookmarks: { ...DEFAULT_USER_PREFERENCES.bookmarks, ...prefs.bookmarks },
+    }
+  } catch (error) {
+    console.error('Error getting user preferences:', error)
+    return DEFAULT_USER_PREFERENCES
+  }
+}
+
+export async function setUserPreferences(prefs: Partial<UserPreferences>): Promise<void> {
+  try {
+    const currentPrefs = await getUserPreferences()
+    const updatedPrefs: UserPreferences = {
+      sorting: prefs.sorting ? { ...currentPrefs.sorting, ...prefs.sorting } : currentPrefs.sorting,
+      tabGroups: prefs.tabGroups ? { ...currentPrefs.tabGroups, ...prefs.tabGroups } : currentPrefs.tabGroups,
+      merge: prefs.merge ? { ...currentPrefs.merge, ...prefs.merge } : currentPrefs.merge,
+      bookmarks: prefs.bookmarks ? { ...currentPrefs.bookmarks, ...prefs.bookmarks } : currentPrefs.bookmarks,
+    }
+    await setStorage('userPreferences', updatedPrefs)
+  } catch (error) {
+    console.error('Error setting user preferences:', error)
+    throw error
+  }
+}
+
+export async function resetUserPreferences(): Promise<void> {
+  try {
+    await setStorage('userPreferences', DEFAULT_USER_PREFERENCES)
+  } catch (error) {
+    console.error('Error resetting user preferences:', error)
+    throw error
+  }
 }

@@ -1,13 +1,23 @@
-import type { TabInfo, OperationProgress } from '@/types/domain'
-import { getAllTabs, getTabsInWindow, closeTabs, groupTabs, sortTabsByDomain } from '@/lib/chrome/tabs'
+import type { TabInfo, OperationProgress, SortOptions, TabGroupOptions } from '@/types/domain'
+import { getAllTabs, getTabsInWindow, closeTabs, groupTabs, sortTabsByDomain, sortTabs, sortAllTabs } from '@/lib/chrome/tabs'
 import { getAllWindows, mergeWindows } from '@/lib/chrome/windows'
-import { getBookmarkTree, getAllBookmarkUrls, getAllFolders, renameBookmark, removeBookmark, isGenericFolderName, getBookmarkChildren } from '@/lib/chrome/bookmarks'
+import { getBookmarkTree, getAllBookmarkUrls, getAllFolders, renameBookmark, removeBookmark, isGenericFolderName, getBookmarkChildren, findOrphanBookmarks, findLargeFolders } from '@/lib/chrome/bookmarks'
 import { getCategoryColor } from '@/lib/chrome/tab-groups'
 import { getLLMConfig } from '@/lib/chrome/storage'
 import { findDuplicateTabs, findDuplicateBookmarks } from '@/lib/algorithms/clustering'
 import { domainOverlap } from '@/lib/algorithms/similarity'
 import { OpenAICompatibleProvider } from '@/lib/llm/openai-compatible'
-import { categorizeTabs, detectWindowTopic, suggestFolderName } from '@/lib/llm/batch-processor'
+import {
+  categorizeTabs,
+  detectWindowTopic,
+  suggestFolderName,
+  smartCategorizeTabs,
+  smartAssignBookmarks,
+  analyzeUserFolders,
+  suggestFolderReorganization,
+  suggestSmartGroupName,
+} from '@/lib/llm/batch-processor'
+import type { ExistingFolder } from '@/lib/llm/prompt-builder'
 import { logger } from '@/lib/utils/logger'
 
 // Message types
@@ -17,6 +27,8 @@ export type MessageType =
   | 'FIND_DUPLICATE_TABS'
   | 'CLOSE_TABS'
   | 'SORT_TABS_BY_DOMAIN'
+  | 'SORT_TABS'
+  | 'SORT_ALL_TABS'
   | 'CREATE_TAB_GROUPS'
   | 'DETECT_WINDOW_TOPIC'
   | 'FIND_MERGE_SUGGESTIONS'
@@ -30,6 +42,14 @@ export type MessageType =
   | 'CATEGORIZE_TABS'
   | 'GET_LLM_CONFIG'
   | 'TEST_LLM_CONNECTION'
+  | 'FIND_ORPHAN_BOOKMARKS'
+  | 'FIND_LARGE_FOLDERS'
+  // Smart AI categorization
+  | 'SMART_CATEGORIZE_TABS'
+  | 'SMART_ASSIGN_BOOKMARKS'
+  | 'ANALYZE_USER_FOLDERS'
+  | 'SUGGEST_FOLDER_REORGANIZATION'
+  | 'SUGGEST_SMART_GROUP_NAME'
 
 export interface Message<T extends MessageType = MessageType> {
   type: T
@@ -69,36 +89,64 @@ const handlers: Partial<Record<MessageType, MessageHandler>> = {
     return { sorted: true }
   },
 
-  CREATE_TAB_GROUPS: async (payload: {
-    categorizedTabs: Array<{ tab: TabInfo; category: string }>
-    windowId: number
-  }) => {
-    const { categorizedTabs, windowId } = payload
+  SORT_TABS: async (payload: { windowId: number; options?: Partial<SortOptions> }) => {
+    await sortTabs(payload.windowId, payload.options)
+    return { sorted: true }
+  },
 
-    // Group tabs by category
-    const byCategory = new Map<string, TabInfo[]>()
-    for (const { tab, category } of categorizedTabs) {
+  SORT_ALL_TABS: async (payload: { options?: Partial<SortOptions> }) => {
+    await sortAllTabs(payload.options)
+    return { sorted: true }
+  },
+
+  CREATE_TAB_GROUPS: async (payload: {
+    categorizedTabs: Array<{ tab: TabInfo; category: string; subtopic?: string }>
+    windowId: number
+    options?: Partial<TabGroupOptions>
+  }) => {
+    const { categorizedTabs, windowId, options } = payload
+    const minTabs = options?.minTabsForGroup ?? 2
+    const useSubtopics = options?.useAISubtopics ?? false
+    const collapseGroups = options?.collapseGroupsOnCreate ?? false
+
+    // Group tabs by category (or subtopic if enabled)
+    const byCategory = new Map<string, { tabs: TabInfo[]; displayName: string }>()
+    for (const { tab, category, subtopic } of categorizedTabs) {
       if (tab.windowId !== windowId) continue
       if (tab.pinned) continue
 
-      const existing = byCategory.get(category)
+      const key = category
+      const displayName = useSubtopics && subtopic ? subtopic : category
+
+      const existing = byCategory.get(key)
       if (existing) {
-        existing.push(tab)
+        existing.tabs.push(tab)
       } else {
-        byCategory.set(category, [tab])
+        byCategory.set(key, { tabs: [tab], displayName })
       }
     }
 
-    // Create groups for categories with 2+ tabs
+    // Create groups for categories meeting the minimum threshold
     const created: string[] = []
-    for (const [category, tabs] of byCategory) {
-      if (tabs.length < 2) continue
+    const groupIds: number[] = []
+    for (const [category, { tabs, displayName }] of byCategory) {
+      if (tabs.length < minTabs) continue
 
-      await groupTabs(
+      const groupId = await groupTabs(
         tabs.map((t) => t.id),
-        { title: category, color: getCategoryColor(category), windowId }
+        { title: displayName, color: getCategoryColor(category), windowId }
       )
-      created.push(category)
+      created.push(displayName)
+      if (groupId !== -1) {
+        groupIds.push(groupId)
+      }
+    }
+
+    // Collapse groups if requested
+    if (collapseGroups && groupIds.length > 0) {
+      for (const groupId of groupIds) {
+        await chrome.tabGroups.update(groupId, { collapsed: true })
+      }
     }
 
     return { groupsCreated: created }
@@ -115,7 +163,8 @@ const handlers: Partial<Record<MessageType, MessageHandler>> = {
     return detectWindowTopic(provider, tabs)
   },
 
-  FIND_MERGE_SUGGESTIONS: async () => {
+  FIND_MERGE_SUGGESTIONS: async (payload?: { overlapThreshold?: number }) => {
+    const threshold = payload?.overlapThreshold ?? 0.5
     const windows = await getAllWindows()
     const suggestions: Array<{
       sourceId: number
@@ -133,7 +182,7 @@ const handlers: Partial<Record<MessageType, MessageHandler>> = {
         const urls2 = win2.tabs.map((t) => t.url)
         const overlap = domainOverlap(urls1, urls2)
 
-        if (overlap > 0.5) {
+        if (overlap >= threshold) {
           suggestions.push({
             sourceId: win1.tabs.length < win2.tabs.length ? win1.id : win2.id,
             targetId: win1.tabs.length < win2.tabs.length ? win2.id : win1.id,
@@ -228,6 +277,17 @@ const handlers: Partial<Record<MessageType, MessageHandler>> = {
     return deadLinks
   },
 
+  FIND_ORPHAN_BOOKMARKS: async () => {
+    const tree = await getBookmarkTree()
+    return findOrphanBookmarks(tree)
+  },
+
+  FIND_LARGE_FOLDERS: async (payload?: { threshold?: number }) => {
+    const tree = await getBookmarkTree()
+    const threshold = payload?.threshold ?? 100
+    return findLargeFolders(tree, threshold)
+  },
+
   CATEGORIZE_TABS: async (payload: {
     windowId?: number
     onProgress?: (progress: OperationProgress) => void
@@ -247,6 +307,145 @@ const handlers: Partial<Record<MessageType, MessageHandler>> = {
     })
   },
 
+  // ============================================
+  // SMART AI CATEGORIZATION HANDLERS
+  // ============================================
+
+  /**
+   * Smart categorize tabs by topic and subtopic (content-based, not domain)
+   */
+  SMART_CATEGORIZE_TABS: async (payload: {
+    windowId?: number
+    windowTopic?: string
+    onProgress?: (progress: OperationProgress) => void
+  }) => {
+    const config = await getLLMConfig()
+    if (!config) {
+      throw new Error('LLM not configured')
+    }
+
+    const provider = new OpenAICompatibleProvider(config)
+    const tabs = payload.windowId
+      ? await getTabsInWindow(payload.windowId)
+      : await getAllTabs()
+
+    return smartCategorizeTabs(provider, tabs, payload.windowTopic, {
+      onProgress: payload.onProgress,
+    })
+  },
+
+  /**
+   * Smart assign orphan bookmarks to existing folders based on content/topic
+   */
+  SMART_ASSIGN_BOOKMARKS: async (payload: {
+    bookmarkIds?: string[]
+    existingFolders: ExistingFolder[]
+    onProgress?: (progress: OperationProgress) => void
+  }) => {
+    const config = await getLLMConfig()
+    if (!config) {
+      throw new Error('LLM not configured')
+    }
+
+    const provider = new OpenAICompatibleProvider(config)
+    const tree = await getBookmarkTree()
+
+    // Get bookmarks to assign - either specified IDs or orphans
+    let bookmarks
+    if (payload.bookmarkIds && payload.bookmarkIds.length > 0) {
+      const allBookmarks = getAllBookmarkUrls(tree)
+      bookmarks = allBookmarks.filter((b) => payload.bookmarkIds!.includes(b.id))
+    } else {
+      bookmarks = findOrphanBookmarks(tree)
+    }
+
+    return smartAssignBookmarks(provider, bookmarks, payload.existingFolders, {
+      onProgress: payload.onProgress,
+    })
+  },
+
+  /**
+   * Analyze user's existing folder organization pattern
+   */
+  ANALYZE_USER_FOLDERS: async () => {
+    const config = await getLLMConfig()
+    if (!config) {
+      throw new Error('LLM not configured')
+    }
+
+    const provider = new OpenAICompatibleProvider(config)
+    const tree = await getBookmarkTree()
+    const folders = getAllFolders(tree)
+
+    // Build folder data with sample titles
+    const folderData = await Promise.all(
+      folders.slice(0, 20).map(async (folder) => {
+        const children = await getBookmarkChildren(folder.id)
+        const bookmarksWithUrls = children.filter((c) => c.url)
+        return {
+          name: folder.title,
+          itemCount: bookmarksWithUrls.length,
+          sampleTitles: bookmarksWithUrls.slice(0, 5).map((b) => b.title),
+        }
+      })
+    )
+
+    return analyzeUserFolders(provider, folderData.filter((f) => f.itemCount > 0))
+  },
+
+  /**
+   * Suggest how to reorganize a messy folder
+   */
+  SUGGEST_FOLDER_REORGANIZATION: async (payload: { folderId: string }) => {
+    const config = await getLLMConfig()
+    if (!config) {
+      throw new Error('LLM not configured')
+    }
+
+    const provider = new OpenAICompatibleProvider(config)
+    const tree = await getBookmarkTree()
+    const folders = getAllFolders(tree)
+
+    // Find the target folder
+    const folder = folders.find((f) => f.id === payload.folderId)
+    if (!folder) {
+      throw new Error('Folder not found')
+    }
+
+    const children = await getBookmarkChildren(folder.id)
+    const bookmarksWithUrls = children.filter((c) => c.url)
+    const existingFolderNames = folders
+      .filter((f) => f.id !== folder.id)
+      .map((f) => f.title)
+
+    return suggestFolderReorganization(
+      provider,
+      folder.title,
+      bookmarksWithUrls,
+      existingFolderNames
+    )
+  },
+
+  /**
+   * Generate a smart, specific group name based on tab content
+   */
+  SUGGEST_SMART_GROUP_NAME: async (payload: { tabIds: number[]; category: string }) => {
+    const config = await getLLMConfig()
+    if (!config) {
+      throw new Error('LLM not configured')
+    }
+
+    const provider = new OpenAICompatibleProvider(config)
+    const allTabs = await getAllTabs()
+    const tabs = allTabs.filter((t) => payload.tabIds.includes(t.id))
+
+    if (tabs.length === 0) {
+      return null
+    }
+
+    return suggestSmartGroupName(provider, tabs, payload.category)
+  },
+
   GET_LLM_CONFIG: async () => {
     return getLLMConfig()
   },
@@ -258,8 +457,26 @@ const handlers: Partial<Record<MessageType, MessageHandler>> = {
     }
 
     const provider = new OpenAICompatibleProvider(config)
-    const success = await provider.testConnection()
-    return { success }
+
+    try {
+      // First try to list models (cheaper test)
+      const models = await provider.listModels()
+      if (models.length > 0) {
+        return { success: true, models }
+      }
+
+      // If no models returned, try a simple completion test
+      const success = await provider.testConnection()
+      if (success) {
+        return { success: true }
+      }
+
+      return { success: false, error: 'Could not connect to API' }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Connection failed'
+      logger.error('LLM connection test failed', { error: message })
+      return { success: false, error: message }
+    }
   },
 }
 

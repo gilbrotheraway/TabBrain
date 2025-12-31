@@ -1,19 +1,62 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useWindows, useWindowMerge, type MergeSuggestion } from '../hooks'
-import { ConfirmDialog } from '../components'
+import { ConfirmDialog, SliderInput } from '../components'
 
 interface WindowMergeProps {
   onBack: () => void
 }
 
+const STORAGE_KEY = 'windowMergeThreshold'
+
 export function WindowMerge({ onBack }: WindowMergeProps) {
   const { windows, refresh: refreshWindows } = useWindows()
   const { suggestions, loading, error, findSuggestions, mergeWindows } = useWindowMerge()
   const [selectedMerge, setSelectedMerge] = useState<MergeSuggestion | null>(null)
+  const [overlapThreshold, setOverlapThreshold] = useState(0.5)
+  const debounceTimeoutRef = useRef<number | null>(null)
 
+  // Load threshold preference on mount
   useEffect(() => {
-    findSuggestions()
-  }, [findSuggestions])
+    chrome.storage.local.get([STORAGE_KEY], (result) => {
+      if (result[STORAGE_KEY] !== undefined) {
+        setOverlapThreshold(result[STORAGE_KEY])
+      }
+    })
+  }, [])
+
+  // Initial scan with loaded threshold
+  useEffect(() => {
+    findSuggestions({ overlapThreshold })
+  }, [findSuggestions, overlapThreshold])
+
+  // Save threshold preference
+  const saveThreshold = useCallback((threshold: number) => {
+    chrome.storage.local.set({ [STORAGE_KEY]: threshold })
+  }, [])
+
+  // Handle threshold change with debounced re-scan
+  const handleThresholdChange = useCallback((newThreshold: number) => {
+    setOverlapThreshold(newThreshold)
+    saveThreshold(newThreshold)
+
+    // Debounce the re-scan
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current)
+    }
+
+    debounceTimeoutRef.current = window.setTimeout(() => {
+      findSuggestions({ overlapThreshold: newThreshold })
+    }, 500)
+  }, [findSuggestions, saveThreshold])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const handleMerge = async () => {
     if (!selectedMerge) return
@@ -52,14 +95,31 @@ export function WindowMerge({ onBack }: WindowMergeProps) {
         </div>
       )}
 
+      <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+        <SliderInput
+          label="Overlap Threshold"
+          value={overlapThreshold}
+          min={0.3}
+          max={0.9}
+          step={0.05}
+          minLabel="More matches"
+          maxLabel="Stricter"
+          valueFormatter={(value) => `${Math.round(value * 100)}%`}
+          onChange={handleThresholdChange}
+        />
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+          Windows are suggested for merging when they share at least this percentage of domains.
+        </p>
+      </div>
+
       {!loading && suggestions.length === 0 && (
         <div className="text-center py-8">
           <p className="text-gray-500 mb-4">No windows with overlapping content found.</p>
           <p className="text-sm text-gray-400">
-            Windows are suggested for merging when they share 50% or more of the same domains.
+            Try lowering the threshold to find more potential matches.
           </p>
           <button
-            onClick={findSuggestions}
+            onClick={() => findSuggestions({ overlapThreshold })}
             className="mt-4 px-4 py-2 text-sm text-primary-600 hover:text-primary-700"
           >
             Scan Again
