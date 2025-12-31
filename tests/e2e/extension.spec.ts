@@ -1,6 +1,8 @@
 import { test, expect, chromium, type BrowserContext } from '@playwright/test'
 import path from 'path'
+import { fileURLToPath } from 'url'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const extensionPath = path.join(__dirname, '../../dist')
 
 test.describe('TabBrain Extension', () => {
