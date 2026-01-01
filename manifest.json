@@ -47,7 +47,9 @@
     "https://api.anthropic.com/*",
     "https://api.deepseek.com/*",
     "https://api.together.xyz/*",
-    "https://openrouter.ai/*",
+    "https://openrouter.ai/*"
+  ],
+  "optional_host_permissions": [
     "http://localhost:*/*",
     "http://127.0.0.1:*/*"
   ]
