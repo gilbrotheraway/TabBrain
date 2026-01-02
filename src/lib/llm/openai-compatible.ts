@@ -97,24 +97,43 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
         throw new Error(`API error: ${response.status} ${errorText}`)
       }
 
-      const data = await response.json() as OpenAIResponse
+      const data = await response.json()
 
-      const choice = data.choices[0]
+      // Handle Ollama response format
+      if (this.isOllama()) {
+        const ollamaData = data as { message?: { content: string }, eval_count?: number, prompt_eval_count?: number }
+        if (!ollamaData.message?.content) {
+          throw new LLMError('No response from Ollama model', 'INVALID_RESPONSE')
+        }
+        logger.debug('Ollama response', { contentLength: ollamaData.message.content.length })
+        return {
+          content: ollamaData.message.content,
+          usage: ollamaData.eval_count ? {
+            promptTokens: ollamaData.prompt_eval_count ?? 0,
+            completionTokens: ollamaData.eval_count,
+            totalTokens: (ollamaData.prompt_eval_count ?? 0) + ollamaData.eval_count,
+          } : undefined,
+        }
+      }
+
+      // Handle OpenAI-compatible response format
+      const openaiData = data as OpenAIResponse
+      const choice = openaiData.choices?.[0]
       if (!choice) {
         throw new LLMError('No response from model', 'INVALID_RESPONSE')
       }
 
       logger.debug('OpenAI response', {
         contentLength: choice.message.content.length,
-        usage: data.usage,
+        usage: openaiData.usage,
       })
 
       return {
         content: choice.message.content,
-        usage: data.usage ? {
-          promptTokens: data.usage.prompt_tokens,
-          completionTokens: data.usage.completion_tokens,
-          totalTokens: data.usage.total_tokens,
+        usage: openaiData.usage ? {
+          promptTokens: openaiData.usage.prompt_tokens,
+          completionTokens: openaiData.usage.completion_tokens,
+          totalTokens: openaiData.usage.total_tokens,
         } : undefined,
       }
     } catch (error) {
@@ -162,8 +181,19 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     }
   }
 
+  private isOllama(): boolean {
+    const base = this.config.baseUrl.toLowerCase()
+    return base.includes('11434') || base.includes('ollama')
+  }
+
   private getCompletionUrl(): string {
     const base = this.config.baseUrl.replace(/\/$/, '')
+
+    // Ollama uses /api/chat for chat completions
+    if (this.isOllama()) {
+      return `${base}/api/chat`
+    }
+
     // Handle different API endpoint patterns
     if (base.endsWith('/v1')) {
       return `${base}/chat/completions`
@@ -177,11 +207,8 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
   private getModelsUrl(): string {
     const base = this.config.baseUrl.replace(/\/$/, '')
 
-    // Ollama uses /api/tags endpoint instead of /models
-    if (base.includes('11434') || base.includes('ollama')) {
-      if (base.endsWith('/api')) {
-        return `${base}/tags`
-      }
+    // Ollama uses /api/tags endpoint
+    if (this.isOllama()) {
       return `${base}/api/tags`
     }
 

@@ -12,10 +12,10 @@ interface ProviderConfig {
 }
 
 const DEFAULT_CONFIG: ProviderConfig = {
-  provider: 'custom',
+  provider: 'ollama',
   apiKey: '',
-  baseUrl: 'http://localhost:3000/api',
-  model: '',
+  baseUrl: 'http://localhost:11434',
+  model: 'llama3.1',
   maxContextTokens: 8000,
   temperature: 0.3,
 }
@@ -23,21 +23,21 @@ const DEFAULT_CONFIG: ProviderConfig = {
 const PROVIDER_DEFAULTS: Record<Provider, Partial<ProviderConfig>> = {
   openai: {
     baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-3.5-turbo',
-    maxContextTokens: 16000,
+    model: 'gpt-4o-mini',
+    maxContextTokens: 128000,
   },
   anthropic: {
-    baseUrl: 'https://api.anthropic.com/v1',
-    model: 'claude-3-haiku-20240307',
-    maxContextTokens: 32000,
+    baseUrl: 'https://api.anthropic.com',
+    model: 'claude-3-5-haiku-latest',
+    maxContextTokens: 200000,
   },
   ollama: {
-    baseUrl: 'http://localhost:11434/api',
+    baseUrl: 'http://localhost:11434',
     model: 'llama3.1',
     maxContextTokens: 8000,
   },
   custom: {
-    baseUrl: '',
+    baseUrl: 'http://localhost:8080/v1',
     model: '',
     maxContextTokens: 8000,
   },
@@ -225,9 +225,15 @@ export default function App() {
           </div>
         </div>
 
-        <p className="mt-4 text-sm text-gray-500 dark:text-gray-400 text-center">
-          For Open WebUI, use the API endpoint (e.g., http://localhost:3000/api)
-        </p>
+        <div className="mt-4 text-sm text-gray-500 dark:text-gray-400 space-y-1">
+          <p className="font-medium">URL Examples:</p>
+          <ul className="list-disc list-inside space-y-1 text-xs">
+            <li><strong>Ollama:</strong> http://localhost:11434</li>
+            <li><strong>LM Studio:</strong> http://localhost:1234/v1</li>
+            <li><strong>Open WebUI:</strong> http://localhost:3000/ollama</li>
+            <li><strong>OpenAI:</strong> https://api.openai.com/v1</li>
+          </ul>
+        </div>
       </div>
     </div>
   )
